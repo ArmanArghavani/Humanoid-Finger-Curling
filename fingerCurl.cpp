@@ -1,74 +1,107 @@
-#include <ESP32Servo.h>   // Servo library for ESP32
-#include <PID_v1.h>       // Arduino PID library
+#include <ESP32Servo.h>
+#include <PID_v1.h>
 
-// === Servo Pin Definitions ===
-const int servoFlexPin = 18;  // GPIO pin for flexion (curling) servo
-const int servoExtPin  = 19;  // GPIO pin for extension servo
+// === Servo Pins ===
+const int servoFlexPin = 18;  // Flexion tendon
+const int servoExtPin  = 19;  // Extension tendon
 
-Servo servoFlex;   // Flexion (curling) servo
-Servo servoExt;    // Extension servo
+Servo servoFlex;
+Servo servoExt;
 
-// === PID Control Variables ===
-double setpoint = 180;     // Target angle for curling
-double inputVal = 0;       // Current servo angle
-double outputVal = 0;      // PID-calculated angle command
+// === Flexion PID Variables ===
+double flexSetpoint = 180;
+double flexInput = 0;
+double flexOutput = 0;
 
-// PID tuning parameters (adjust as needed)
-double Kp = 1.2;
-double Ki = 0.05;
-double Kd = 0.01;
+double flexKp = 1.2, flexKi = 0.05, flexKd = 0.01;
+PID flexPID(&flexInput, &flexOutput, &flexSetpoint, flexKp, flexKi, flexKd, DIRECT);
 
-// Create PID controller
-PID curlPID(&inputVal, &outputVal, &setpoint, Kp, Ki, Kd, DIRECT);
+// === Extension PID Variables ===
+double extSetpoint = 180;
+double extInput = 0;
+double extOutput = 0;
+
+double extKp = 1.2, extKi = 0.05, extKd = 0.01;
+PID extPID(&extInput, &extOutput, &extSetpoint, extKp, extKi, extKd, DIRECT);
 
 void setup() {
   Serial.begin(115200);
 
-  // Attach servos to their pins
   servoFlex.attach(servoFlexPin);
   servoExt.attach(servoExtPin);
 
-  // Initialize servos to extended position
-  servoFlex.write(0);    // Curling tendon released
-  servoExt.write(180);   // Extension tendon pulled
+  // Start with finger extended
+  servoFlex.write(0);
+  servoExt.write(180);
   delay(1000);
 
-  // Set PID limits and timing
-  curlPID.SetMode(AUTOMATIC);
-  curlPID.SetOutputLimits(0, 180);
-  curlPID.SetSampleTime(10);
+  // Initialize PIDs
+  flexPID.SetMode(AUTOMATIC);
+  flexPID.SetOutputLimits(0, 180);
+  flexPID.SetSampleTime(10);
+
+  extPID.SetMode(AUTOMATIC);
+  extPID.SetOutputLimits(0, 180);
+  extPID.SetSampleTime(10);
 }
 
 void loop() {
   for (int i = 0; i < 10; i++) {
-    Serial.print("Cycle ");
-    Serial.println(i + 1);
+    Serial.printf("Cycle %d\n", i + 1);
 
-    // === Extension Phase ===
-    servoExt.write(180);   // Pull extension tendon
-    servoFlex.write(0);    // Release curl tendon
-    Serial.println("Extended");
-    delay(3000);
+    // === EXTEND PHASE with PID ===
+    flexSetpoint = 0;     // Release flexion
+    extSetpoint = 180;    // Pull extension
 
-    // === Curling Phase using PID ===
-    servoExt.write(0);     // Release extension tendon
-    inputVal = 0;          // Start at 0° (extended)
-    setpoint = 180;        // Target curl position
+    flexInput = 180;      // Simulated: assume was curled
+    extInput = 0;         // Simulated: assume was unextended
 
-    Serial.println("Curling...");
-    while (abs(setpoint - inputVal) > 1) {
-      curlPID.Compute();                    // Compute new output
-      int angleCmd = constrain((int)outputVal, 0, 180);
-      servoFlex.write(angleCmd);           // Move flexion servo
-      inputVal = angleCmd;                 // Update current angle
-      delay(20);                           // Smooth movement
+    Serial.println("Extending...");
+    while (abs(extSetpoint - extInput) > 1) {
+      extPID.Compute();
+      flexPID.Compute();  // Still maintain flex release
+
+      int extCmd = constrain(extOutput, 0, 180);
+      int flexCmd = constrain(flexOutput, 0, 180);
+
+      servoExt.write(extCmd);
+      servoFlex.write(flexCmd);
+
+      extInput = extCmd;
+      flexInput = flexCmd;
+
+      delay(20);
     }
 
-    Serial.println("Curled");
+    delay(3000);  // Hold extended
+
+    // === CURL PHASE with PID ===
+    flexSetpoint = 180;   // Pull flexion
+    extSetpoint = 0;      // Release extension
+
+    flexInput = 0;        // Simulated: assume was extended
+    extInput = 180;
+
+    Serial.println("Curling...");
+    while (abs(flexSetpoint - flexInput) > 1) {
+      flexPID.Compute();
+      extPID.Compute();  // Still maintain extension release
+
+      int flexCmd = constrain(flexOutput, 0, 180);
+      int extCmd = constrain(extOutput, 0, 180);
+
+      servoFlex.write(flexCmd);
+      servoExt.write(extCmd);
+
+      flexInput = flexCmd;
+      extInput = extCmd;
+
+      delay(20);
+    }
+
     delay(3000);  // Hold curled
   }
 
-  // After 10 cycles, stop movement
-  Serial.println("Done.");
-  while (true);
+  Serial.println("Finished all cycles.");
+  while (true);  // Halt execution
 }
